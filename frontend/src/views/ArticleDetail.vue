@@ -20,10 +20,11 @@
             </div>
           </div>
         </template>
-        
-        <div class="article-content" v-html="renderedContent"></div>
+
+        <div v-if="hasBody" class="article-content" v-html="renderedContent"></div>
+        <el-empty v-else description="本文暂无正文内容" :image-size="80" />
       </el-card>
-      
+
       <div class="back-button">
         <el-button @click="goBack">
           <el-icon><ArrowLeft /></el-icon>
@@ -31,13 +32,34 @@
         </el-button>
       </div>
     </template>
-    
-    <el-empty v-if="!loading && !article" description="文章不存在" />
+
+    <el-result
+      v-else-if="!loading && status === 'not-found'"
+      icon="warning"
+      title="文章不存在"
+      sub-title="文章可能已被删除，或链接有误"
+    >
+      <template #extra>
+        <el-button type="primary" @click="goBack">返回列表</el-button>
+      </template>
+    </el-result>
+
+    <el-result
+      v-else-if="!loading && status === 'error'"
+      icon="error"
+      title="加载失败"
+      sub-title="网络或服务出现异常，请稍后重试"
+    >
+      <template #extra>
+        <el-button type="primary" @click="fetchArticle">重试</el-button>
+        <el-button @click="goBack">返回列表</el-button>
+      </template>
+    </el-result>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -47,7 +69,11 @@ const route = useRoute()
 const router = useRouter()
 
 const article = ref(null)
-const loading = ref(false)
+const loading = ref(true)
+// 'idle' | 'ready' | 'not-found' | 'error'
+const status = ref('idle')
+// Monotonic id so an out-of-order response can never overwrite a newer request.
+let requestSeq = 0
 
 // Configure marked
 marked.setOptions({
@@ -55,8 +81,10 @@ marked.setOptions({
   gfm: true
 })
 
+const hasBody = computed(() => !!article.value?.body?.trim())
+
 const renderedContent = computed(() => {
-  if (!article.value) return ''
+  if (!hasBody.value) return ''
   return marked(article.value.body)
 })
 
@@ -64,21 +92,48 @@ onMounted(() => {
   fetchArticle()
 })
 
+// The component instance can be reused when navigating from one article to
+// another; refetch so the previous article (or its failure) never leaks in.
+watch(() => route.params.id, (newId, oldId) => {
+  if (route.name === 'ArticleDetail' && newId && newId !== oldId) {
+    fetchArticle()
+  }
+})
+
 async function fetchArticle() {
+  const seq = ++requestSeq
+  const { id } = route.params
   loading.value = true
+  // Clear the previous result up front so stale content or a stale failure
+  // state is never shown for the new article.
+  article.value = null
+  status.value = 'idle'
   try {
-    const { id } = route.params
     const response = await api.get(`/articles/${id}`)
+    if (seq !== requestSeq) return // superseded by a newer request
     article.value = response.data
+    status.value = 'ready'
   } catch (error) {
+    if (seq !== requestSeq) return
+    // 404 means the article is gone (retrying won't help); anything else is
+    // a transient load failure that the user can retry.
+    status.value = error.response?.status === 404 ? 'not-found' : 'error'
     console.error('Failed to fetch article:', error)
   } finally {
-    loading.value = false
+    if (seq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
 function goBack() {
-  router.push('/')
+  // Prefer the in-app history entry so the list keeps its page, filters and
+  // scroll position; fall back to the home page for direct visits.
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    router.push('/')
+  }
 }
 
 function formatDate(dateStr) {

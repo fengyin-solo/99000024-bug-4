@@ -5,7 +5,8 @@ const routes = [
   {
     path: '/',
     name: 'Home',
-    component: () => import('../views/Home.vue')
+    component: () => import('../views/Home.vue'),
+    meta: { keepAlive: true }
   },
   {
     path: '/article/:id',
@@ -45,7 +46,15 @@ const routes = [
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
+  routes,
+  scrollBehavior(to, from, savedPosition) {
+    // Restore the list scroll position when navigating back (e.g. from an
+    // article); every fresh navigation starts at the top.
+    if (savedPosition) {
+      return savedPosition
+    }
+    return { top: 0 }
+  }
 })
 
 // Navigation guard for auth

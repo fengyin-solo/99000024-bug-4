@@ -79,26 +79,43 @@ const emptyDescription = computed(() => {
 })
 
 onMounted(() => {
-  if (route.query.tag) {
-    selectedTag.value = route.query.tag
-  }
-  if (route.query.search) {
-    searchQuery.value = route.query.search
-  }
+  applyQueryState(route.query)
   fetchArticles()
   fetchTags()
 })
 
-watch(() => route.query, (newQuery) => {
-  if (newQuery.tag !== selectedTag.value) {
-    selectedTag.value = newQuery.tag || null
+// The list state (page / tag / search) is mirrored in the URL query, so
+// coming back from an article restores the exact same list.
+watch(() => route.query, () => {
+  // Home is kept alive while viewing an article; ignore route changes that
+  // belong to other pages so the preserved list state is left untouched.
+  if (route.name !== 'Home') return
+  if (applyQueryState(route.query)) {
+    fetchArticles()
   }
-  if (newQuery.search !== searchQuery.value) {
-    searchQuery.value = newQuery.search || ''
-  }
-  currentPage.value = 1
-  fetchArticles()
 })
+
+function applyQueryState(query) {
+  const page = Math.max(parseInt(query.page, 10) || 1, 1)
+  const tag = query.tag || null
+  const search = query.search || ''
+  const changed =
+    page !== currentPage.value ||
+    tag !== selectedTag.value ||
+    search !== searchQuery.value
+  currentPage.value = page
+  selectedTag.value = tag
+  searchQuery.value = search
+  return changed
+}
+
+function buildQuery(page) {
+  const query = {}
+  if (selectedTag.value) query.tag = selectedTag.value
+  if (searchQuery.value) query.search = searchQuery.value
+  if (page > 1) query.page = String(page)
+  return query
+}
 
 async function fetchArticles() {
   loading.value = true
@@ -135,19 +152,18 @@ async function fetchTags() {
 
 function handlePageChange(page) {
   currentPage.value = page
+  // Sync the page into the URL so it survives entering an article and back.
+  router.replace({ query: buildQuery(page) })
   fetchArticles()
 }
 
 function handleTagSelect(tag) {
-  selectedTag.value = tag
-  currentPage.value = 1
-  
+  // Selecting a tag resets to the first page; the route watcher above
+  // picks up the query change and triggers the fetch.
   const query = {}
   if (tag) query.tag = tag
   if (searchQuery.value) query.search = searchQuery.value
-  
   router.replace({ query })
-  fetchArticles()
 }
 
 function clearSearch() {
