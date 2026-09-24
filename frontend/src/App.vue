@@ -2,7 +2,12 @@
   <div id="app">
     <Navbar />
     <main class="main-content">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <!-- 缓存文章列表，从详情返回时保留页码与浏览位置 -->
+        <keep-alive include="Home">
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </main>
   </div>
 </template>

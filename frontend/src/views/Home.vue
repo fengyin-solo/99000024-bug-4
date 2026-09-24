@@ -48,6 +48,9 @@ import ArticleCard from '../components/ArticleCard.vue'
 import TagFilter from '../components/TagFilter.vue'
 import Pagination from '../components/Pagination.vue'
 
+// keep-alive 按组件名缓存，从详情页返回时保留列表状态
+defineOptions({ name: 'Home' })
+
 const route = useRoute()
 const router = useRouter()
 
@@ -90,12 +93,14 @@ onMounted(() => {
 })
 
 watch(() => route.query, (newQuery) => {
-  if (newQuery.tag !== selectedTag.value) {
-    selectedTag.value = newQuery.tag || null
-  }
-  if (newQuery.search !== searchQuery.value) {
-    searchQuery.value = newQuery.search || ''
-  }
+  // 离开列表页（如进入文章详情）时不响应 query 变化，避免重置列表状态
+  if (route.name !== 'Home') return
+  const newTag = newQuery.tag || null
+  const newSearch = newQuery.search || ''
+  // 从详情页返回时 query 与当前状态一致，无需重置页码和重新加载
+  if (newTag === selectedTag.value && newSearch === searchQuery.value) return
+  selectedTag.value = newTag
+  searchQuery.value = newSearch
   currentPage.value = 1
   fetchArticles()
 })

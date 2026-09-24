@@ -20,10 +20,11 @@
             </div>
           </div>
         </template>
-        
-        <div class="article-content" v-html="renderedContent"></div>
+
+        <div v-if="hasBody" class="article-content" v-html="renderedContent"></div>
+        <el-empty v-else description="本文暂无正文内容" :image-size="80" />
       </el-card>
-      
+
       <div class="back-button">
         <el-button @click="goBack">
           <el-icon><ArrowLeft /></el-icon>
@@ -31,13 +32,34 @@
         </el-button>
       </div>
     </template>
-    
-    <el-empty v-if="!loading && !article" description="文章不存在" />
+
+    <el-result
+      v-else-if="!loading && error"
+      :icon="error.type === 'not-found' ? 'warning' : 'error'"
+      :title="error.type === 'not-found' ? '文章不存在' : '文章加载失败'"
+      :sub-title="error.type === 'not-found'
+        ? '文章可能已被删除，或链接地址有误'
+        : '网络异常或服务器出错，请检查网络连接后重试'"
+    >
+      <template #extra>
+        <el-button
+          v-if="error.type === 'load-failed'"
+          type="primary"
+          @click="fetchArticle"
+        >
+          重试
+        </el-button>
+        <el-button @click="goBack">
+          <el-icon><ArrowLeft /></el-icon>
+          返回列表
+        </el-button>
+      </template>
+    </el-result>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -48,6 +70,8 @@ const router = useRouter()
 
 const article = ref(null)
 const loading = ref(false)
+// 加载失败原因：null | { type: 'not-found' | 'load-failed' }
+const error = ref(null)
 
 // Configure marked
 marked.setOptions({
@@ -55,8 +79,12 @@ marked.setOptions({
   gfm: true
 })
 
+const hasBody = computed(() => {
+  return !!(article.value?.body && article.value.body.trim())
+})
+
 const renderedContent = computed(() => {
-  if (!article.value) return ''
+  if (!hasBody.value) return ''
   return marked(article.value.body)
 })
 
@@ -64,21 +92,39 @@ onMounted(() => {
   fetchArticle()
 })
 
+// 组件复用切换文章（如 /article/1 -> /article/2）时重新加载，
+// fetchArticle 会先清空旧数据，避免残留上一篇的内容或失败状态
+watch(() => route.params.id, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    fetchArticle()
+  }
+})
+
 async function fetchArticle() {
   loading.value = true
+  article.value = null
+  error.value = null
   try {
     const { id } = route.params
     const response = await api.get(`/articles/${id}`)
     article.value = response.data
-  } catch (error) {
-    console.error('Failed to fetch article:', error)
+  } catch (err) {
+    console.error('Failed to fetch article:', err)
+    error.value = {
+      type: err.response?.status === 404 ? 'not-found' : 'load-failed'
+    }
   } finally {
     loading.value = false
   }
 }
 
 function goBack() {
-  router.push('/')
+  // 有历史记录时回退，保留列表的页码与滚动位置；直接打开详情页时回到首页
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    router.push('/')
+  }
 }
 
 function formatDate(dateStr) {
@@ -96,6 +142,7 @@ function formatDate(dateStr) {
   max-width: 800px;
   margin: 0 auto;
   padding-top: 20px;
+  min-height: 200px;
 }
 
 .article-header {
